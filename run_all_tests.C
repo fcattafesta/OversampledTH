@@ -38,6 +38,12 @@ int test_comparison() {
   OversampledTH<TH1F> oversampledTH{"OSHist", "OversampledTH", nBins, xMin, xMax, oversamplingFactor};
   auto result_oversampled = rdf.Book(std::move(oversampledTH), {"event", histName.c_str()});
 
+  // Create jackknife object but keep a pointer to access methods later
+  std::cout<< "----- JK book ----"<<std::endl;
+  auto jackknifeTH = std::make_shared<OversampledTH<TH1F>>("OSHist_jackknife", "OversampledTH Jackknife", nBins, xMin, xMax, oversamplingFactor, 100);
+  auto result_jackknife = rdf.Book(*jackknifeTH, {"event", histName.c_str()});
+  std::cout<< "----- JK book done ----"<<std::endl;
+
   PrototypeOversampledTH<TH1F> firstProto{"FirstProto", "FirstPrototype", nBins, xMin, xMax};
   auto result_first = rdf.Book(std::move(firstProto), {"event", histName.c_str()});
 
@@ -45,17 +51,65 @@ int test_comparison() {
   auto oversampled_result = result_oversampled.GetValue();
   auto first_result = result_first.GetValue();
 
+  std::cout <<"--- JK GetValue ----"<<std::endl;
+  auto jackknife_result = result_jackknife.GetValue();
+  std::cout <<"--- end JK ----"<<std::endl;
+
   std::cout << "Regular Histogram - Entries: " << regular_result.GetEntries() << ", Mean: " << regular_result.GetMean()
             << std::endl;
   std::cout << "OversampledTH - Entries: " << oversampled_result.GetEntries()
             << ", Mean: " << oversampled_result.GetMean() << std::endl;
   std::cout << "FirstPrototype - Entries: " << first_result.GetEntries() << ", Mean: " << first_result.GetMean()
             << std::endl;
+  std::cout << "Jackknife - Entries: " << jackknife_result.GetEntries() << ", Mean: " << jackknife_result.GetMean()
+            << std::endl;
 
   auto outputFile = TFile::Open("comparison.root", "RECREATE");
   regular_result.Write("regular");
   oversampled_result.Write("oversampled");
   first_result.Write("first_prototype");
+  jackknife_result.Write("jackknife");
+  
+  // Now we can access the covariance matrix through the shared pointer
+  std::cout<<"---- JK COV -----" <<std::endl;
+  auto covJackknife = jackknifeTH->getCovJackKnife();
+  covJackknife->Write("cov_jackknife");
+  auto avgJackknife = jackknifeTH->getJackknifeAverage();
+  avgJackknife->Write("avg_jackkinfe");
+  std::cout<<"---- JK COV done -----" <<std::endl;
+
+  if (true){
+    // Plot and save jackknife result and covariance matrix as PDF
+    TCanvas c1("c1", "Jackknife Results", 1200, 600);
+    c1.Divide(2,1);
+
+    // Plot jackknife result histogram
+    c1.cd(1);
+    // set the errorbars from the diagonal element of the covariance matrix
+    avgJackknife->SetStats(kFALSE);
+    for(int i=1 ;i<=avgJackknife->GetNbinsX();++i )
+    {
+      avgJackknife->SetBinError(i, TMath::Sqrt( covJackknife->GetBinContent(i,i) ));
+    }
+    avgJackknife->SetLineColor(kBlue);
+    avgJackknife->SetTitle("Jackknife Result");
+    avgJackknife->Scale(1.0 / oversamplingFactor); // Scale by oversampling factor as others?
+    avgJackknife->Draw("E1");
+    // 
+
+    oversampled_result.SetLineColor(kRed);
+    oversampled_result.Draw("SAME E1");
+
+    // Plot jackknife covariance matrix
+    c1.cd(2);
+    covJackknife->SetTitle("Jackknife Covariance Matrix");
+    covJackknife->Draw("COLZ");
+
+    // Save to PDF
+    c1.SaveAs("jackknife_results.pdf");
+
+    }
+
   outputFile->Close();
 
   return 0;
