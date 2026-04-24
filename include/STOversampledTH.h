@@ -84,8 +84,8 @@ public:
     }
 
     if (genEvent != lastGenEvent) {
-      std::cout << "GenEvent changed from " << lastGenEvent << " to " << genEvent << std::endl;
-      std::cout << "Flushing histograms @ genEvent: " << lastGenEvent << std::endl;
+    //   std::cout << "GenEvent changed from " << lastGenEvent << " to " << genEvent << std::endl;
+    //   std::cout << "Flushing histograms @ genEvent: " << lastGenEvent << std::endl;
       Flush();
       lastGenEvent = genEvent;
     }
@@ -103,7 +103,7 @@ public:
     for (const auto &kv : fHists) {
       const auto &hist = *kv.second;
       const auto &genEvent = kv.first;
-      std::cout << "     -> Flushing histogram for genEvent: " << genEvent << std::endl;
+      //   std::cout << "     -> Flushing histogram for genEvent: " << genEvent << std::endl;
       for (size_t bin = 0; bin <= hist.GetNbinsX() + 1; bin++) {
         fFinalHist->Fill(hist.GetBinCenter(bin), hist.GetBinContent(bin) / static_cast<double>(oversamplingFactor));
       }
@@ -112,7 +112,7 @@ public:
   }
 
   void Finalize() {
-    std::cout << "Finalizing STOversampledTH." << std::endl;
+    //   std::cout << "Finalizing STOversampledTH." << std::endl;
     Flush();
   }
   std::string GetActionName() { return "STOversampledTH"; }

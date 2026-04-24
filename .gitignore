@@ -45,3 +45,9 @@
 
 # ROOT files
 *.root
+
+# PNG files
+*.png
+
+# JSON files
+*.json
