@@ -124,9 +124,9 @@ public:
     auto &slotHist = *fSlotHists[slot];
     for (int bin = 0; bin <= eventHist.GetNbinsX() + 1; ++bin) {
       const double content = eventHist.GetBinContent(bin);
-      // if (content == 0.0) {
-      //   continue;
-      // }
+      if (content == 0.0) {
+        continue;
+      }
       slotHist.Fill(eventHist.GetBinCenter(bin), content / static_cast<double>(oversamplingFactor));
     }
     eventHist.Reset();

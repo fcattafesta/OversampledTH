@@ -13,7 +13,6 @@ Single-threaded oversampled histogram action for ROOT RDataFrame.
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 
 class TTreeReader;
 
@@ -24,11 +23,44 @@ public:
 
 private:
   int oversamplingFactor = 1;
-  long int lastGenEvent = -1;
-  std::unordered_map<unsigned long, std::unique_ptr<TH>> fHists;
+  unsigned long fCurrentGenEvent = 0;
+  bool fHasCurrentEvent = false;
+  std::unique_ptr<TH> fCurrentEventHist;
   std::shared_ptr<TH> fFinalHist;
 
-  void ClearHists_() { fHists.clear(); }
+  std::unique_ptr<TH> MakeEmptyClone_() const {
+    auto h = std::unique_ptr<TH>(static_cast<TH *>(fFinalHist->Clone()));
+    h->SetDirectory(nullptr);
+    h->Reset();
+    return h;
+  }
+
+  void ResetState_() {
+    fHasCurrentEvent = false;
+    fCurrentGenEvent = 0;
+    if (!fCurrentEventHist && fFinalHist) {
+      fCurrentEventHist = MakeEmptyClone_();
+    }
+    if (fCurrentEventHist) {
+      fCurrentEventHist->Reset();
+    }
+  }
+
+  void FlushCurrentEvent_() {
+    if (!fFinalHist || !fCurrentEventHist || !fHasCurrentEvent) {
+      return;
+    }
+    const auto &hist = *fCurrentEventHist;
+    for (int bin = 0; bin <= hist.GetNbinsX() + 1; ++bin) {
+      const double content = hist.GetBinContent(bin);
+      if (content == 0.0) {
+        continue;
+      }
+      fFinalHist->Fill(hist.GetBinCenter(bin), content / static_cast<double>(oversamplingFactor));
+    }
+    fCurrentEventHist->Reset();
+    fHasCurrentEvent = false;
+  }
 
 public:
   STOversampledTH(
@@ -43,73 +75,73 @@ public:
           "STOversampledTH is designed for single-threaded execution. Please disable implicit multi-threading.");
     }
     fFinalHist->SetDirectory(nullptr);
+    fCurrentEventHist = MakeEmptyClone_();
   }
   STOversampledTH(const STOversampledTH &other)
       : oversamplingFactor(other.oversamplingFactor),
-        lastGenEvent(-1),
         fFinalHist(other.fFinalHist ? std::shared_ptr<TH>(static_cast<TH *>(other.fFinalHist->Clone())) : nullptr) {
     if (fFinalHist) {
       fFinalHist->SetDirectory(nullptr);
+      fFinalHist->Reset();
+      fCurrentEventHist = MakeEmptyClone_();
     }
+    ResetState_();
   }
   STOversampledTH &operator=(const STOversampledTH &other) {
     if (this == &other) {
       return *this;
     }
 
-    ClearHists_();
     oversamplingFactor = other.oversamplingFactor;
-    lastGenEvent = -1;
     fFinalHist = other.fFinalHist ? std::shared_ptr<TH>(static_cast<TH *>(other.fFinalHist->Clone())) : nullptr;
     if (fFinalHist) {
       fFinalHist->SetDirectory(nullptr);
+      fFinalHist->Reset();
+      fCurrentEventHist = MakeEmptyClone_();
+    } else {
+      fCurrentEventHist.reset();
     }
+    ResetState_();
     return *this;
   }
   STOversampledTH(STOversampledTH &&) = default;
   STOversampledTH &operator=(STOversampledTH &&) = default;
-  ~STOversampledTH() { ClearHists_(); }
+  ~STOversampledTH() = default;
   std::shared_ptr<TH> GetResultPtr() const { return fFinalHist; }
   void Initialize() {}
-  void InitTask(TTreeReader *, unsigned int) {}
+  void InitTask(TTreeReader *, unsigned int) {
+    if (!fCurrentEventHist && fFinalHist) {
+      fCurrentEventHist = MakeEmptyClone_();
+    }
+  }
 
   //   template <typename T>
   //   void Exec(unsigned long genEvent, ROOT::VecOps::RVec<T> values, double weight = 1);
 
   template <typename T>
   void Exec(unsigned int slot, unsigned long genEvent, T values, double weight = 1) {
+    (void)slot;
     if (!fFinalHist) {
       std::cerr << "Error: fFinalHist is null" << std::endl;
       return;
     }
-
-    if (genEvent != lastGenEvent) {
-    //   std::cout << "GenEvent changed from " << lastGenEvent << " to " << genEvent << std::endl;
-    //   std::cout << "Flushing histograms @ genEvent: " << lastGenEvent << std::endl;
-      Flush();
-      lastGenEvent = genEvent;
+    if (!fCurrentEventHist) {
+      fCurrentEventHist = MakeEmptyClone_();
     }
 
-    if (fHists.find(genEvent) == fHists.end()) {
-      auto h = std::unique_ptr<TH>(static_cast<TH *>(fFinalHist->Clone()));
-      h->SetDirectory(nullptr);
-      h->Reset();
-      fHists.emplace(genEvent, std::move(h));
+    if (!fHasCurrentEvent) {
+      fHasCurrentEvent = true;
+      fCurrentGenEvent = genEvent;
+    } else if (genEvent != fCurrentGenEvent) {
+      FlushCurrentEvent_();
+      fHasCurrentEvent = true;
+      fCurrentGenEvent = genEvent;
     }
-    fHists[genEvent]->Fill(values, weight);
+
+    fCurrentEventHist->Fill(values, weight);
   }
 
-  void Flush() {
-    for (const auto &kv : fHists) {
-      const auto &hist = *kv.second;
-      const auto &genEvent = kv.first;
-      //   std::cout << "     -> Flushing histogram for genEvent: " << genEvent << std::endl;
-      for (size_t bin = 0; bin <= hist.GetNbinsX() + 1; bin++) {
-        fFinalHist->Fill(hist.GetBinCenter(bin), hist.GetBinContent(bin) / static_cast<double>(oversamplingFactor));
-      }
-    }
-    fHists.clear();
-  }
+  void Flush() { FlushCurrentEvent_(); }
 
   void Finalize() {
     //   std::cout << "Finalizing STOversampledTH." << std::endl;
