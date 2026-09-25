@@ -1,13 +1,13 @@
 import argparse
-import os
 import ROOT
+from common import DEFAULT_SPEC, REPO_ROOT, sample_from_spec
 
-include_path = os.path.join(os.path.dirname(__file__), os.pardir, "include")
-ROOT.gInterpreter.AddIncludePath(include_path)
-ROOT.gInterpreter.Declare('#include "DumbOversampledTH.h"')
+ROOT.gInterpreter.AddIncludePath(str(REPO_ROOT / "include"))
+ROOT.gInterpreter.Declare('#include "OversampledHistogram.h"')
 
-parser = argparse.ArgumentParser(description="Test the DumbOversampledTH class.")
+parser = argparse.ArgumentParser(description="Slot-local oversampled histogram on a NanoAOD sample")
 parser.add_argument("-j", type=int, default=1, help="Number of threads to use (default: 1)")
+parser.add_argument("--spec", default=DEFAULT_SPEC, help="RDF sample spec JSON")
 args = parser.parse_args()
 
 if args.j > 1:
@@ -16,22 +16,22 @@ if args.j > 1:
 else:
     print("Starting test with implicit multi-threading disabled.")
 
-root_file = "/scratchnvme/store/mc/RunIII2024Summer24NanoAODv15/DY2Mu_2Jets_MLL-105to160-April2026_IreneFakes_Oversampling9_FlashSim/260421_142939/0000/tree_10.root"
+root_file, tree_name = sample_from_spec(args.spec)
 file = ROOT.TFile.Open(root_file)
-events = file.Get("Events")
+events = file.Get(tree_name)
 print(f"Number of events: {events.GetEntries()}")
 
-rdf = ROOT.RDataFrame("Events", root_file).Define("nGenJet", "static_cast<unsigned int>(GenJet_pt.size())")
+rdf = ROOT.RDataFrame(tree_name, root_file).Define("nGenJet", "static_cast<unsigned int>(GenJet_pt.size())")
 rdf_base = rdf.Filter("fold == 0")
 rdf_sel = rdf.Filter("ROOT::VecOps::Sum(Jet_pt > 30) >= 2")
 rdf_base_sel = rdf_base.Filter("ROOT::VecOps::Sum(Jet_pt > 30) >= 2")
 
 h_base = rdf_base.Histo1D(("h_base_nMuon", "Base nMuon Histogram;Number of Muons;Entries", 5, -0.5, 4.5), "nMuon")
-helper_0 = ROOT.DumbOversampledTH1D(9, "h_oversampled", "Oversampled nMuon Histogram", 5, -0.5, 4.5)
+helper_0 = ROOT.SlotLocalOversampledHistogram1D(9, "h_oversampled", "Oversampled nMuon Histogram", 5, -0.5, 4.5)
 h_oversampled = rdf.Book(helper_0, ("event", "nMuon"))
-helper_1 = ROOT.DumbOversampledTH1D(9, "h_gen_over", "Oversampled Gen Histogram", 5, -0.5, 4.5)
+helper_1 = ROOT.SlotLocalOversampledHistogram1D(9, "h_gen_over", "Oversampled Gen Histogram", 5, -0.5, 4.5)
 h_gen_over = rdf.Book(helper_1, ("event", "nGenJet"))
-helper_2 = ROOT.DumbOversampledTH1D(9, "h_sel_over", "Oversampled nMuon (nJet >= 30) >= 2", 5, -0.5, 4.5)
+helper_2 = ROOT.SlotLocalOversampledHistogram1D(9, "h_sel_over", "Oversampled nMuon (nJet >= 30) >= 2", 5, -0.5, 4.5)
 h_sel_over = rdf_sel.Book(helper_2, ("event", "nMuon"))
 h_gen_base = rdf_base.Histo1D(("h_gen_base_1", "Base Gen nJet Histogram;Number of Gen Jets;Entries", 5, -0.5, 4.5), "nGenJet")
 h_sel_base = rdf_base_sel.Histo1D(("h_sel_base", "Base nMuon (nJet >= 30) >= 2;Number of Muons;Entries", 5, -0.5, 4.5), "nMuon")

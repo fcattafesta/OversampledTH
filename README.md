@@ -1,63 +1,31 @@
 # OversampledTH
 
-A ROOT RDataFrame action for creating histograms with proper uncertainty handling when performing oversampling in Flashsim.
+Header-only C++17 histogram actions for ROOT `RDataFrame::Book`. They combine oversampled rows by generated event before filling a `TH1`, so bin errors reflect event-level contributions.
 
-This repository currently includes:
+| Action | Execution | Required grouping |
+| --- | --- | --- |
+| `SequentialOversampledHistogram` | One thread | Equal event IDs are contiguous. |
+| `SlotLocalOversampledHistogram` | Multiple RDF slots | Equal IDs are contiguous within one slot and never span slots. |
+| `RangeAwareOversampledHistogram` | Multiple RDF slots | Equal IDs are contiguous in global entry order; pass RDF entry-range bounds. |
 
-- `STOversampledTH`: single-thread helper
-- `DumbOversampledTH`: multi-thread helper that assumes the same `genEvent` is not split across slots
+The public header is [`include/OversampledHistogram.h`](include/OversampledHistogram.h). The repository is organized as follows:
 
-The dumb MT helper prints diagnostics in `Finalize()`:
+| Directory | Contents |
+| --- | --- |
+| [`examples/`](examples/) | PyROOT and C++ examples for each action. |
+| [`data/`](data/) | Input sample specification. |
+| [`test/`](test/) | Automated correctness, coherence, event-count, and memory tests. |
+| [`studies/`](studies/) | Throughput benchmark, per-bin exact/approximate error comparison, slot-split scan, range inspection, and generated results in `output/`. |
+| [`docs/`](docs/) | [Usage](docs/usage.md), [assumptions and practical tips](docs/assumptions.md), [performance](docs/performance.md), and [architecture](docs/architecture.md). |
 
-- number of unique `genEvent`
-- number of `genEvent` seen in more than one slot (`split across slots`)
+## Build and test
 
-The split count quantifies the amount of assumption violation in MT execution.
-
-## Testing
-
-Run the test suite to compare performance and accuracy:
-
-### Single-thread test
-
-```sh
-python test/single-threaded.py
-```
-
-### Dumb multi-thread test
+ROOT with `Hist` and `ROOTDataFrame`, CMake, and a C++17 compiler are required. The automated tests use synthetic data:
 
 ```sh
-python test/dumb-multi-threaded.py -j 4
+cmake -S . -B build -DCMAKE_PREFIX_PATH="$(root-config --prefix)"
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
-This prints histogram summaries and the dumb MT diagnostics line:
-
-```text
-DumbOversampledTH diagnostics: unique genEvents=..., split across slots=...
-```
-
-### Scan split-fault distribution vs threads
-
-Use the scan utility to measure split-fault behavior as a function of thread count, with repeated runs for uncertainty estimation.
-
-Default configuration:
-
-- 6 log-spaced thread points from 2 to 250
-- 5 repetitions per point
-
-Run:
-
-```sh
-python test/scan_dumb_mt_faults.py
-```
-
-Optional overrides:
-
-```sh
-python test/scan_dumb_mt_faults.py --runs 5 --points 6 --min-threads 2 --max-threads 250
-```
-
-Outputs:
-
-- `test/dumb_mt_faults_scan.png`: plot with mean/std vs thread count and per-thread distributions
-- `test/dumb_mt_faults_scan.json`: raw samples, means, and standard deviations
+The sample-specific PyROOT examples use the file listed in `data/site_sample.json`. Pass `--spec path/to/spec.json` to use another sample. Benchmark instructions and the scope of the measured results are in [`docs/performance.md`](docs/performance.md).

@@ -1,0 +1,12 @@
+{
+    "samples": {
+        "sample": {
+            "trees": [
+                "Events"
+            ],
+            "files": [
+                "/scratchnvme/store/mc/RunIII2024Summer24NanoAODv15/DY2Mu_2Jets_MLL-105to160-April2026_IreneFakes_Oversampling9_FlashSim/260421_142939/0000/tree_10.root"
+            ]
+        }
+    }
+}

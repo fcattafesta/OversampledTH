@@ -51,3 +51,12 @@
 
 # JSON files
 *.json
+
+# Local builds and Python bytecode
+build/
+__pycache__/
+
+# Input specs and study results
+!data/*.json
+!studies/output/*.json
+!studies/output/*.png

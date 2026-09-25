@@ -1,30 +1,15 @@
 import argparse
-import json
-import os
 import ROOT
+from common import DEFAULT_SPEC, REPO_ROOT, sample_from_spec
 
-include_path = os.path.join(os.path.dirname(__file__), os.pardir, "include")
-ROOT.gInterpreter.AddIncludePath(include_path)
-ROOT.gInterpreter.Declare('#include "RangeOversampledTH.h"')
+ROOT.gInterpreter.AddIncludePath(str(REPO_ROOT / "include"))
+ROOT.gInterpreter.Declare('#include "OversampledHistogram.h"')
 
-root_file = "/scratchnvme/store/mc/RunIII2024Summer24NanoAODv15/DY2Mu_2Jets_MLL-105to160-April2026_IreneFakes_Oversampling9_FlashSim/260421_142939/0000/tree_10.root"
-
-spec = {
-    "samples": {
-        "sample": {
-            "trees": ["Events"],
-            "files": [root_file],
-        }
-    }
-}
-
-if not os.path.exists("spec.json"):
-    with open("spec.json", "w") as f:
-        json.dump(spec, f, indent=2)
-
-parser = argparse.ArgumentParser(description="Test RangeOversampledTH")
+parser = argparse.ArgumentParser(description="Range-aware oversampled histogram on a NanoAOD sample")
 parser.add_argument("-j", type=int, default=1, help="Number of threads to use")
+parser.add_argument("--spec", default=DEFAULT_SPEC, help="RDF sample spec JSON")
 args = parser.parse_args()
+sample_from_spec(args.spec)
 
 if args.j > 1:
     print(f"Starting range test with implicit multi-threading enabled. Using {args.j} threads.")
@@ -32,7 +17,7 @@ if args.j > 1:
 else:
     print("Starting range test with implicit multi-threading disabled.")
 
-rdf = ROOT.RDF.Experimental.FromSpec("spec.json")
+rdf = ROOT.RDF.Experimental.FromSpec(str(args.spec))
 rdf = (
     rdf.Define("nGenJet", "static_cast<unsigned int>(GenJet_pt.size())")
     .DefinePerSample("range_begin", "static_cast<ULong64_t>(rdfsampleinfo_.EntryRange().first)")
@@ -44,13 +29,13 @@ rdf_base_sel = rdf_base.Filter("ROOT::VecOps::Sum(Jet_pt > 30) >= 2")
 
 h_base = rdf_base.Histo1D(("h_base_nMuon", "Base nMuon Histogram;Number of Muons;Entries", 5, -0.5, 4.5), "nMuon")
 
-helper_0 = ROOT.RangeOversampledTH1D(9, "h_oversampled", "Range Oversampled nMuon Histogram", 5, -0.5, 4.5)
+helper_0 = ROOT.RangeAwareOversampledHistogram1D(9, "h_oversampled", "Range Oversampled nMuon Histogram", 5, -0.5, 4.5)
 h_oversampled = rdf.Book(helper_0, ("event", "nMuon", "range_begin", "range_end"))
 
-helper_1 = ROOT.RangeOversampledTH1D(9, "h_gen_over", "Range Oversampled Gen Histogram", 5, -0.5, 4.5)
+helper_1 = ROOT.RangeAwareOversampledHistogram1D(9, "h_gen_over", "Range Oversampled Gen Histogram", 5, -0.5, 4.5)
 h_gen_over = rdf.Book(helper_1, ("event", "nGenJet", "range_begin", "range_end"))
 
-helper_2 = ROOT.RangeOversampledTH1D(9, "h_fold1_over", "Range Oversampled nMuon (nJet >= 30) >= 2", 5, -0.5, 4.5)
+helper_2 = ROOT.RangeAwareOversampledHistogram1D(9, "h_fold1_over", "Range Oversampled nMuon (nJet >= 30) >= 2", 5, -0.5, 4.5)
 h_fold1_over = rdf_sel.Book(helper_2, ("event", "nMuon", "range_begin", "range_end"))
 
 h_gen_base = rdf_base.Histo1D(("h_gen_base_1", "Base Gen nJet Histogram;Number of Gen Jets;Entries", 5, -0.5, 4.5), "nGenJet")

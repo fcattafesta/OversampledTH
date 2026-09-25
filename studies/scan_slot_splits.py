@@ -7,6 +7,7 @@ import re
 import statistics
 import subprocess
 import sys
+from pathlib import Path
 
 import matplotlib
 
@@ -14,7 +15,7 @@ matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 
 
-FAULT_RE = re.compile(r"split across slots=(\d+)")
+SPLIT_RE = re.compile(r"split across slots=(\d+)")
 
 
 def build_logspace_threads(start: int, stop: int, n_points: int) -> list[int]:
@@ -48,8 +49,8 @@ def build_logspace_threads(start: int, stop: int, n_points: int) -> list[int]:
     return vals
 
 
-def parse_fault_count(output: str) -> int:
-    matches = [int(x) for x in FAULT_RE.findall(output)]
+def parse_split_count(output: str) -> int:
+    matches = [int(x) for x in SPLIT_RE.findall(output)]
     if not matches:
         raise RuntimeError("Could not find 'split across slots=...' in command output")
 
@@ -61,8 +62,10 @@ def parse_fault_count(output: str) -> int:
     return max(matches)
 
 
-def run_one(test_script: str, n_threads: int, python_bin: str) -> tuple[int, str]:
+def run_one(test_script: str, n_threads: int, python_bin: str, spec: str | None) -> tuple[int, str]:
     cmd = [python_bin, test_script, "-j", str(n_threads)]
+    if spec:
+        cmd.extend(["--spec", spec])
     proc = subprocess.run(cmd, capture_output=True, text=True)
     merged = (proc.stdout or "") + "\n" + (proc.stderr or "")
 
@@ -73,33 +76,34 @@ def run_one(test_script: str, n_threads: int, python_bin: str) -> tuple[int, str
             f"Output:\n{merged}"
         )
 
-    return parse_fault_count(merged), merged
+    return parse_split_count(merged), merged
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Scan DumbOversampledTH split-fault counts vs number of threads and plot summary."
+        description="Scan SlotLocalOversampledHistogram split counts vs number of threads and plot summary."
     )
     parser.add_argument("--runs", type=int, default=5, help="Number of repetitions per thread count (default: 5)")
     parser.add_argument("--points", type=int, default=6, help="Number of logspace thread points (default: 6)")
     parser.add_argument("--min-threads", type=int, default=2, help="Minimum number of threads (default: 2)")
     parser.add_argument("--max-threads", type=int, default=250, help="Maximum number of threads (default: 250)")
     parser.add_argument(
-        "--python-bin", default=sys.executable, help="Python executable used to run dumb-multi-threaded.py"
+        "--python-bin", default=sys.executable, help="Python executable used to run slot-local-multi-threaded.py"
     )
     parser.add_argument(
         "--test-script",
-        default=os.path.join(os.path.dirname(__file__), "dumb-multi-threaded.py"),
-        help="Path to dumb-multi-threaded.py",
+        default=str(Path(__file__).resolve().parents[1] / "examples" / "py" / "slot-local-multi-threaded.py"),
+        help="Path to the slot-local example",
     )
+    parser.add_argument("--spec", help="Optional RDF sample spec passed to the example")
     parser.add_argument(
         "--out-png",
-        default=os.path.join(os.path.dirname(__file__), "dumb_mt_faults_scan.png"),
+        default=str(Path(__file__).parent / "output" / "slot_splits_scan.png"),
         help="Output PNG path",
     )
     parser.add_argument(
         "--out-json",
-        default=os.path.join(os.path.dirname(__file__), "dumb_mt_faults_scan.json"),
+        default=str(Path(__file__).parent / "output" / "slot_splits_scan.json"),
         help="Output JSON path",
     )
     args = parser.parse_args()
@@ -110,6 +114,8 @@ def main() -> int:
         raise ValueError("--runs must be >= 1")
     if args.points < 1:
         raise ValueError("--points must be >= 1")
+    if args.points > args.max_threads - args.min_threads + 1:
+        raise ValueError("--points exceeds the available integer thread counts")
 
     thread_values = build_logspace_threads(args.min_threads, args.max_threads, args.points)
     print(f"Thread points: {thread_values}")
@@ -122,9 +128,9 @@ def main() -> int:
         for r in range(args.runs):
             run_idx += 1
             print(f"[{run_idx}/{total_runs}] Running -j {t}, repetition {r + 1}/{args.runs} ...")
-            faults, _ = run_one(args.test_script, t, args.python_bin)
-            samples[t].append(faults)
-            print(f"    faults={faults}")
+            splits, _ = run_one(args.test_script, t, args.python_bin, args.spec)
+            samples[t].append(splits)
+            print(f"    splits={splits}")
 
     means = [statistics.mean(samples[t]) for t in thread_values]
     stds = [statistics.pstdev(samples[t]) for t in thread_values]
@@ -133,11 +139,11 @@ def main() -> int:
         "thread_values": thread_values,
         "runs_per_thread": args.runs,
         "samples": {str(k): v for k, v in samples.items()},
-        "mean_faults": {str(t): means[i] for i, t in enumerate(thread_values)},
-        "std_faults": {str(t): stds[i] for i, t in enumerate(thread_values)},
+        "mean_splits": {str(t): means[i] for i, t in enumerate(thread_values)},
+        "std_splits": {str(t): stds[i] for i, t in enumerate(thread_values)},
     }
 
-    os.makedirs(os.path.dirname(args.out_json), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(args.out_json)), exist_ok=True)
     with open(args.out_json, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 
@@ -153,27 +159,27 @@ def main() -> int:
     ax0.set_xticklabels([str(t) for t in thread_values])
     ax0.set_xlabel("Threads")
     ax0.set_ylabel("Split genEvents")
-    ax0.set_title("Split-fault count vs threads (mean +/- std)")
+    ax0.set_title("Split count vs threads (mean +/- std)")
     ax0.grid(axis="y", alpha=0.3)
 
-    max_fault = max(max(v) for v in samples.values())
-    bins = list(range(0, max_fault + 2))
+    max_splits = max(max(v) for v in samples.values())
+    bins = list(range(0, max_splits + 2))
     hist_data = [samples[t] for t in thread_values]
     labels = [f"j={t}" for t in thread_values]
     ax1.hist(hist_data, bins=bins, histtype="step", linewidth=1.8, label=labels)
     ax1.set_xlabel("Split genEvents")
     ax1.set_ylabel("Count across repeated runs")
-    ax1.set_title("Fault-count distributions")
+    ax1.set_title("Split-count distributions")
     ax1.grid(axis="y", alpha=0.3)
     ax1.legend(fontsize=8)
 
     fig.suptitle(
-        f"DumbOversampledTH split-fault scan ({args.runs} runs each, {len(thread_values)} thread points)",
+        f"SlotLocalOversampledHistogram split scan ({args.runs} runs each, {len(thread_values)} thread points)",
         fontsize=12,
     )
     fig.tight_layout()
 
-    os.makedirs(os.path.dirname(args.out_png), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(args.out_png)), exist_ok=True)
     fig.savefig(args.out_png, dpi=160)
     print(f"Saved plot: {args.out_png}")
     print(f"Saved data: {args.out_json}")
