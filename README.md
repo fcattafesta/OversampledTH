@@ -16,7 +16,7 @@ The public header is [`include/OversampledHistogram.h`](include/OversampledHisto
 | [`data/`](data/) | Input sample specification. |
 | [`test/`](test/) | Automated correctness, coherence, event-count, and memory tests. |
 | [`studies/`](studies/) | Throughput benchmark, per-bin exact/approximate error comparison, slot-split scan, range inspection, and generated results in `output/`. |
-| [`docs/`](docs/) | [Usage](docs/usage.md), [assumptions and practical tips](docs/assumptions.md), [performance](docs/performance.md), and [architecture](docs/architecture.md). |
+| [`docs/`](docs/) | [Usage](docs/usage.md), [assumptions and practical tips](docs/assumptions.md), [performance](docs/performance.md), [boundary memory](docs/boundary_memory.md), and [architecture](docs/architecture.md). |
 
 ## Build and test
 

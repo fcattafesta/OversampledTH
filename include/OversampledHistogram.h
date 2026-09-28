@@ -65,6 +65,72 @@ namespace oversampled_detail {
     }
   }
 
+  // Preserve the intermediate bin precision of the supported TH1F/TH1D types.
+  template <typename TH>
+  using BinContent = std::conditional_t<std::is_base_of_v<TH1F, TH>, float, double>;
+
+  template <typename Content>
+  struct SparseEvent {
+    struct Bin {
+      int index;
+      Content content;
+    };
+    std::vector<Bin> bins;  // Sorted, unique bin indices; zero totals are omitted.
+    std::size_t pieces = 0;
+
+    void Merge(SparseEvent &&other) {
+      pieces += other.pieces;
+      if (bins.empty()) {
+        bins = std::move(other.bins);
+        return;
+      }
+      if (other.bins.empty()) {
+        return;
+      }
+      std::vector<Bin> combined;
+      combined.reserve(bins.size() + other.bins.size());
+      auto left = bins.begin();
+      auto right = other.bins.begin();
+      while (left != bins.end() && right != other.bins.end()) {
+        if (left->index < right->index) {
+          combined.push_back(*left++);
+        } else if (right->index < left->index) {
+          combined.push_back(*right++);
+        } else {
+          const Content total = static_cast<Content>(left->content + right->content);
+          if (total != Content{}) {
+            combined.push_back({left->index, total});
+          }
+          ++left;
+          ++right;
+        }
+      }
+      combined.insert(combined.end(), left, bins.end());
+      combined.insert(combined.end(), right, other.bins.end());
+      bins = std::move(combined);
+    }
+  };
+
+  template <typename TH>
+  SparseEvent<BinContent<TH>> ExtractEvent(const TH &hist) {
+    SparseEvent<BinContent<TH>> event;
+    event.pieces = 1;
+    for (int bin = 0; bin <= hist.GetNbinsX() + 1; ++bin) {
+      const auto content = static_cast<BinContent<TH>>(hist.GetBinContent(bin));
+      if (content != BinContent<TH>{}) {
+        event.bins.push_back({bin, content});
+      }
+    }
+    return event;
+  }
+
+  template <typename TH>
+  void FillEvent(TH &output, const SparseEvent<BinContent<TH>> &event, int factor) {
+    for (const auto &bin : event.bins) {
+      output.Fill(output.GetBinCenter(bin.index), static_cast<double>(bin.content) / factor);
+    }
+  }
+
   template <typename T>
   struct IsRVec : std::false_type {};
 
@@ -340,32 +406,25 @@ public:
       state->output->Reset();
     }
 
-    std::unordered_map<oversampled_detail::EventId, std::unique_ptr<TH>> merged;
+    BoundaryMap merged;
     for (auto &state : fSlots) {
-      for (auto &[id, hist] : state->boundary) {
-        auto &target = merged[id];
-        if (!target) {
-          target = oversampled_detail::CloneEmpty(*fResult);
+      while (!state->boundary.empty()) {
+        auto node = state->boundary.extract(state->boundary.begin());
+        auto target = merged.find(node.key());
+        if (target == merged.end()) {
+          // Transfer the map node and its vector without cloning or copying bins.
+          merged.insert(std::move(node));
+        } else {
+          target->second.Merge(std::move(node.mapped()));
         }
-        target->Add(hist.get());
       }
-      state->boundary.clear();
-    }
-    for (const auto &[id, hist] : merged) {
-      (void)id;
-      oversampled_detail::FillEvent(*fResult, *hist, fFactor);
-    }
-    std::unordered_map<oversampled_detail::EventId, unsigned int> pieceCounts;
-    for (auto &state : fSlots) {
-      for (const auto &[id, count] : state->boundaryPieces) {
-        pieceCounts[id] += count;
-      }
-      state->boundaryPieces.clear();
+      BoundaryMap{}.swap(state->boundary);  // Release consumed slot bucket storage too.
     }
     unsigned int split = 0;
-    for (const auto &[id, count] : pieceCounts) {
+    for (const auto &[id, event] : merged) {
       (void)id;
-      split += count > 1;
+      oversampled_detail::FillEvent(*fResult, event, fFactor);
+      split += event.pieces > 1;
     }
     std::cout << "RangeAwareOversampledHistogram diagnostics: boundary genEvents=" << merged.size()
               << ", split across ranges=" << split << '\n';
@@ -375,6 +434,9 @@ public:
   std::string GetActionName() { return "RangeAwareOversampledHistogram"; }
 
 private:
+  using BoundaryEvent = oversampled_detail::SparseEvent<oversampled_detail::BinContent<TH>>;
+  using BoundaryMap = std::unordered_map<oversampled_detail::EventId, BoundaryEvent>;
+
   struct State : oversampled_detail::SlotState<TH> {
     using oversampled_detail::SlotState<TH>::SlotState;
     bool hasRange = false;
@@ -382,17 +444,11 @@ private:
     unsigned long rangeEnd = 0;
     bool hasFirst = false;
     oversampled_detail::EventId first = 0;
-    std::unordered_map<oversampled_detail::EventId, std::unique_ptr<TH>> boundary;
-    std::unordered_map<oversampled_detail::EventId, unsigned int> boundaryPieces;
+    BoundaryMap boundary;
   };
 
   void DeferBoundary(State &state) {
-    auto &target = state.boundary[state.current];
-    if (!target) {
-      target = oversampled_detail::CloneEmpty(*state.event);
-    }
-    target->Add(state.event.get());
-    ++state.boundaryPieces[state.current];
+    state.boundary[state.current].Merge(oversampled_detail::ExtractEvent(*state.event));
     state.event->Reset();
     state.hasCurrent = false;
   }

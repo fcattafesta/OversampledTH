@@ -9,3 +9,5 @@ ctest --test-dir build --output-on-failure
 ```
 
 These tests use synthetic data and do not depend on the site-local file in `data/`.
+
+`test_sparse_boundaries.cpp` compares sparse boundary merging against the former dense ROOT-histogram calculation for `TH1D` and `TH1F`, including cancellation, underflow/overflow, empty vectors, full occupancy, and repeated pieces across slots and ranges. It also processes 1,000 events with eight slots and 10,000 bins, enforcing a 64 MiB peak-RSS growth budget through finalization.

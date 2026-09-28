@@ -1,5 +1,9 @@
 # Performance and study results
 
+## Sparse boundary-memory update
+
+The 2026-09-28 sparse boundary implementation reduced peak RSS growth from 372 MiB to 2 MiB in a controlled 10,000-bin, eight-slot case with one occupied bin per event. See [boundary_memory.md](boundary_memory.md) for the full comparison, uncertainty validation, full-occupancy case, and reproduction instructions. The throughput results below were recorded before this storage change.
+
 ## Reproducing the synthetic benchmark
 
 Build `benchmark_actions`, then run:
